@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Wake Proof — Stage 1</title>
+<style>
+  :root { --bg:#0e1116; --fg:#e8ecf1; --dim:#8a94a3; --accent:#3fb7ff; color-scheme:dark }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.4 -apple-system,system-ui,sans-serif;
+         padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) 12px max(12px,env(safe-area-inset-left)) }
+  #stage { position:relative; width:100%; max-width:640px; margin:0 auto; }
+  video, canvas { width:100%; display:block; border-radius:8px }
+  canvas { position:absolute; inset:0; height:100% }
+  #hud { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; margin:10px 0; font-variant-numeric:tabular-nums }
+  #hud b { color:var(--accent); font-size:1.4em }
+  #controls { display:flex; gap:8px; flex-wrap:wrap; justify-content:center }
+  button, select, label.file { font:inherit; padding:10px 14px; border-radius:8px; border:1px solid #2a3340; background:#1a212b; color:var(--fg) }
+  button.primary { background:var(--accent); color:#00121f; border:0; font-weight:600 }
+  input[type=file] { display:none }
+  #status { text-align:center; color:var(--dim); min-height:1.4em }
+  #reps { text-align:center; font-size:1.3em; font-variant-numeric:tabular-nums }
+  #reps b { font-size:2.2em; color:var(--accent) }
+  #calib { display:block; font-size:.7em; color:var(--dim) }
+  #prompt { text-align:center; margin:10px 0 }
+  #say { font-size:1.8em; font-weight:700; line-height:1.2 }
+  #sub { color:var(--dim); font-size:1.2em; font-variant-numeric:tabular-nums }
+  #prompt.pass #say { color:#3fdc7a } #prompt.fail #say { color:#ff5a5a }
+</style>
+</head>
+<body>
+<div id="controls">
+  <button id="start" class="primary">Start camera</button>
+  <select id="model" aria-label="Pose model">
+    <option value="lite">lite</option>
+    <option value="full" selected>full</option>
+    <option value="heavy">heavy</option>
+  </select>
+  <select id="facing" aria-label="Camera">
+    <option value="user">front camera</option>
+    <option value="environment">back camera</option>
+  </select>
+  <label class="file">Use video file<input id="file" type="file" accept="video/*"></label>
+  <select id="exercise" aria-label="Exercise">
+    <option value="jumping_jack">jumping jacks</option>
+    <option value="squat">squats</option>
+  </select>
+  <button id="count-btn">Start counting</button>
+  <button id="challenge-btn" class="primary">Start challenge</button>
+</div>
+<div id="prompt" hidden><div id="say"></div><div id="sub"></div></div>
+<div id="reps">reps <b id="count">–</b> <span id="calib"></span></div>
+<div id="hud">
+  <span>FPS <b id="fps">–</b></span>
+  <span>infer <b id="ms">–</b> ms</span>
+  <span>visible <b id="vis">–</b></span>
+  <span id="delegate"></span>
+</div>
+<p id="status">Tap Start camera.</p>
+<div id="stage">
+  <video id="video" playsinline muted autoplay></video>
+  <canvas id="overlay"></canvas>
+</div>
+
+<script type="module">
+import { PoseLandmarker, FilesetResolver, DrawingUtils }
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+import { RepCounter } from "./counter.js";
+import { Challenge, makeSteps } from "./challenge.js";
+const WASM = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
+const MODEL = v => `https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_${v}/float16/1/pose_landmarker_${v}.task`;
+
+const $ = id => document.getElementById(id);
+const video = $("video"), canvas = $("overlay"), ctx = canvas.getContext("2d");
+const draw = new DrawingUtils(ctx);
+let fileset, landmarker, loadedModel, lastVideoTime = -1, frames = 0, inferSum = 0, tick = performance.now();
+
+async function loadModel(v) {
+  if (landmarker && loadedModel === v) return;
+  $("status").textContent = `Loading ${v} model…`;
+  fileset ??= await FilesetResolver.forVisionTasks(WASM);
+  landmarker?.close();
+  for (const delegate of ["GPU", "CPU"]) {
+    try {
+      landmarker = await PoseLandmarker.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: MODEL(v), delegate },
+        runningMode: "VIDEO", numPoses: 1,
+      });
+      $("delegate").textContent = delegate;
+      break;
+    } catch (e) { console.warn(delegate, "failed", e); }
+  }
+  loadedModel = v;
+  $("status").textContent = `${v} model ready.`;
+}
+
+async function startCamera() {
+  try {
+    await loadModel($("model").value);
+    video.srcObject?.getTracks().forEach(t => t.stop());
+    video.removeAttribute("src");
+    video.srcObject = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: $("facing").value, width: { ideal: 640 }, height: { ideal: 480 } }, audio: false,
+    });
+    await video.play();
+    run();
+  } catch (e) { $("status").textContent = "Camera error: " + e.message; }
+}
+
+async function startFile(f) {
+  await loadModel($("model").value);
+  video.srcObject?.getTracks().forEach(t => t.stop());
+  video.srcObject = null;
+  video.src = URL.createObjectURL(f);
+  video.loop = true;
+  await video.play();
+  run();
+}
+
+let running = false;
+function run() {
+  if (running) return; running = true;
+  const loop = () => {
+    if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+      lastVideoTime = video.currentTime;
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      const t0 = performance.now();
+      const res = landmarker.detectForVideo(video, t0);
+      inferSum += performance.now() - t0; frames++;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const lm = res.landmarks[0];
+      if (challenge && !challenge.result) {
+        challenge.aspect = video.videoWidth / video.videoHeight;
+        const t = performance.now() / 1000, slim = compact(lm);
+        recording.push({ t, lm: slim });                 // the server re-runs exactly these frames
+        const r = challenge.update(slim, t);
+        $("say").textContent = challenge.prompt; $("sub").textContent = challenge.detail;
+        if (r) {
+          $("prompt").className = r.pass ? "pass" : "fail";
+          $("sub").textContent = r.pass ? `done in ${r.secs.toFixed(0)} s` : r.why;
+          speak(r.pass ? "Pass" : "Fail");
+          if (r.pass && !challenge.fromFile) submit();
+          else if (r.pass) $("sub").textContent += " (video file: practice only, not posted)";
+        } else if (challenge.prompt !== lastSaid) speak(lastSaid = challenge.prompt);
+      }
+      if (counter) counter.aspect = video.videoWidth / video.videoHeight;
+      if (counter && counter.update(lm, performance.now() / 1000)) {
+        if (!calibrated && counter.count === 3) {
+          const r = counter.calibrate(3);
+          if (r.ok) { calibrated = true; counter.count = 0; $("calib").textContent = "Calibrated. Counting."; }
+          else { counter.reset(); $("calib").textContent = `Calibration failed (${r.why}). Do 3 full reps again.`; }
+        }
+        $("count").textContent = calibrated ? counter.count : `${counter.count}/3`;
+      }
+      if (lm) {
+        draw.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS, { color: "#3fb7ff", lineWidth: 3 });
+        draw.drawLandmarks(lm, { color: "#ffd23f", radius: 3 });
+        $("vis").textContent = lm.filter(p => p.visibility > 0.5).length + "/33";
+      } else $("vis").textContent = "0/33";
+    }
+    const now = performance.now();
+    if (now - tick >= 1000) {
+      $("fps").textContent = (frames * 1000 / (now - tick)).toFixed(1);
+      $("ms").textContent = frames ? (inferSum / frames).toFixed(0) : "–";
+      frames = 0; inferSum = 0; tick = now;
+    }
+    requestAnimationFrame(loop);
+  };
+  loop();
+}
+
+let challenge = null, lastSaid = "";
+// Read prompts aloud so you don't have to read the screen half-asleep.
+const speak = text => { try { speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(text)); } catch {} };
+// Keep only the joints the checker uses, rounded; others become empty placeholders.
+const USED = new Set([0, 11, 12, 15, 16, 23, 24, 25, 26, 27, 28]);
+const r4 = v => Math.round(v * 1e4) / 1e4;
+const compact = lm => lm ? lm.map((q, i) => USED.has(i) ? { x: r4(q.x), y: r4(q.y), visibility: r4(q.visibility) } : { x: 0, y: 0, visibility: 0 }) : null;
+let recording = [], challengeId = null;
+async function submit() {
+  $("sub").textContent = "Checking on the server…";
+  try {
+    const res = await fetch("api/result", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: challengeId, frames: recording, aspect: challenge.aspect }) });
+    const v = await res.json();
+    $("prompt").className = v.pass ? "pass" : "fail";
+    $("say").textContent = v.pass ? "PASS" : "FAIL";
+    $("sub").textContent = v.pass ? `${v.line} — ${v.posted ? "posted" : "NOT posted (network error)"}` : v.why;
+  } catch (e) { $("sub").textContent = "Could not reach the server: " + e.message; }
+}
+$("challenge-btn").onclick = async () => {
+  if (!video.srcObject && !video.src) await startCamera();
+  counter = null;
+  speak("Starting");                       // first speech must come from a tap on iPhone
+  let steps = null;
+  try { const c = await (await fetch("api/challenge")).json(); steps = c.steps; challengeId = c.id; }
+  catch { $("prompt").hidden = false; $("say").textContent = "Server unreachable"; return; }
+  challenge = new Challenge(steps);         // random sequence drawn by the server now, not before
+  recording = [];
+  challenge.fromFile = !video.srcObject;    // video-file runs are practice only, never posted
+  lastSaid = "";
+  $("prompt").hidden = false; $("prompt").className = "";
+};
+let counter = null, calibrated = false;
+$("count-btn").onclick = () => {
+  counter = new RepCounter($("exercise").value, { aspect: (video.videoWidth / video.videoHeight) || 0.5625 });
+  calibrated = false; challenge = null; $("prompt").hidden = true;
+  $("count").textContent = "0/3";
+  $("calib").textContent = "Calibration: do 3 full reps.";
+};
+$("start").onclick = startCamera;
+$("file").onchange = e => e.target.files[0] && startFile(e.target.files[0]);
+$("model").onchange = () => (video.srcObject || video.src) && loadModel($("model").value);
+window.__wp = { loadModel, get landmarker() { return landmarker; }, get counter() { return counter; } }; // test hook
+</script>
+</body>
+</html>
