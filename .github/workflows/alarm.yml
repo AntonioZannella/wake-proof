@@ -15,12 +15,19 @@ on:
 concurrency:
   group: wake-alarm
   cancel-in-progress: false
+permissions:
+  contents: read
+  actions: write     # only for the keep-alive step below
 jobs:
   alarm:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
+      # GitHub turns off schedules in repos with no commits for 60 days; re-enabling resets that clock.
+      - run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/alarm.yml/enable"
+        continue-on-error: true
+        env: { GH_TOKEN: "${{ github.token }}" }
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: python alarm.py

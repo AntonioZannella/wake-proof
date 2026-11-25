@@ -113,6 +113,7 @@ check the signature without the key. Stage 5 moves the check off this Mac.
   proof does not pause; heartbeats from someone lying down are refused; upright heartbeats pause
   (0 emails); emails resume after a FAIL; PASS stops the alarm. Page gate checked in the browser.
   Not tested: real Gmail sending, the GitHub Actions run, the Render deploy of these changes.
-- Tested offline: `test_arming.py`.
+- Tested offline: `test_arming.py`. Every future ARM is kept alive; each run also re-enables the
+  workflow so GitHub's 60-day no-commit shutoff does not apply.
 - Limits: GitHub may start scheduled jobs late (hourly runs give several chances) and disables schedules in
   repos with no activity for 60 days. Someone who writes code could fake heartbeats.

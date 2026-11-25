@@ -30,6 +30,13 @@ for age, rows_msg, want_posts in [(7 * 3600, f"ARM {tomorrow} 6:30", [f"ARM {tom
     server.armed()
     assert posts == want_posts, (age, rows_msg, posts)
 
+# several future alarms: each old one is kept alive, past ones are dropped
+posts.clear()
+server.urllib.request.urlopen = fake_open([{"time": time.time() - 7 * 3600, "message": m}
+                                           for m in ["ARM 2099-01-01 06:30", "ARM 2099-01-15 07:00", "ARM 2000-01-01 06:30"]])
+assert server.armed() == "2099-01-01 06:30"
+assert sorted(posts) == ["ARM 2099-01-01 06:30", "ARM 2099-01-15 07:00"], posts
+
 # job confirmation: posted once when the job sees an ARM, not again, not for a plain check
 for job, rows, want in [(True, [f"ARM {tomorrow} 06:30"], 1), (False, [f"ARM {tomorrow} 06:30"], 0),
                         (True, [f"ARM {tomorrow} 06:30", f"CONFIRMED {tomorrow} 06:30 seen by alarm job at x"], 0),

@@ -85,10 +85,16 @@ def armed(job=False):
     rows = [json.loads(r) for r in raw.splitlines() if r.strip()]
     today = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     at = pick_arm([r.get("message", "") for r in rows], today)
-    if at != "off":   # keep it alive: the hourly alarm job calls this, so an ARM never ages out
-        newest = max(r.get("time", 0) for r in rows if pick_arm([r.get("message", "")], "") == at)
-        if time.time() - newest > REFRESH_SECS:
-            post(url, f"ARM {at}")
+    # Keep every future ARM alive (the hourly alarm job calls this), so alarms can be set weeks ahead.
+    newest = {}
+    for r in rows:
+        a = pick_arm([r.get("message", "")], today)
+        if a != "off":
+            newest[a] = max(newest.get(a, 0), r.get("time", 0))
+    for a, t in newest.items():
+        if time.time() - t > REFRESH_SECS:
+            post(url, f"ARM {a}")
+    if at != "off":
         # Proof for Ollie that the GitHub alarm job itself saw this ARM (posted once per alarm time).
         if job and not any(r.get("message", "").startswith(f"CONFIRMED {at} ") for r in rows):
             now = datetime.now(ZoneInfo("America/New_York"))

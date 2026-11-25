@@ -17,4 +17,6 @@ curl -s -d "ARM 2026-11-26 06:30" "$WAKE_TOPIC_URL"
 - Second check, about 1 hour after posting (the alarm job runs once an hour, at :17): read the
   wake topic. A line `CONFIRMED 2026-11-26 06:30 seen by alarm job at ... ET` means the job itself
   saw the ARM. No CONFIRMED line after 90 minutes means something is wrong: tell Antonio.
+- Alarms can be set days or weeks ahead: one ARM line per morning. Backup: once a day, re-post
+  every upcoming ARM line you are keeping track of (repeats are harmless and cannot delay anything).
 - Do not print the topic address in chat. ARM lines are not PASS lines.
