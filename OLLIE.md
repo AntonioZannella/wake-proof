@@ -7,8 +7,8 @@ curl -s -d "ARM 2026-11-26 06:30" "$WAKE_TOPIC_URL"
 ```
 
 - Format: `ARM YYYY-MM-DD HH:MM`, date of the morning, 24-hour time, Eastern.
-- When: between about 6 PM the evening before and 3 AM. The topic keeps messages about 12 hours,
-  and the alarm job checks at about 3:30-4:30 AM Eastern.
+- When: any time before the alarm, even days ahead. The alarm job checks every hour and the site
+  keeps the ARM line alive, so it does not expire. Arm at least about an hour ahead to be safe.
 - There is no OFF. Once armed, only Antonio's PASS stops the emails. If several ARM messages exist,
   the earliest time wins, so a later message can only make the alarm sooner, never cancel or delay it.
 - Do not print the topic address in chat. ARM lines are not PASS lines.

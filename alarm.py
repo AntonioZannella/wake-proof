@@ -17,6 +17,7 @@ ET = ZoneInfo("America/New_York")
 SITE = os.environ.get("SITE", "https://wake-proof.onrender.com").rstrip("/")
 EVERY = int(os.environ.get("EVERY", 60))
 DRY = os.environ.get("DRY_RUN") == "1"
+LOOKAHEAD = 3 * 3600   # s: a run only waits for an alarm this close; hourly runs cover the rest
 
 
 def alarm_start():
@@ -75,9 +76,13 @@ def main():
     wait = start - time.time()
     if wait < -2 * 3600:
         print("alarm time was more than 2 h ago; nothing to do"); return
-    if wait > 0:
+    if wait > LOOKAHEAD:   # an hourly run closer to the alarm will take it
+        print(f"armed for {datetime.fromtimestamp(start, ET):%H:%M} Eastern; a later run will handle it"); return
+    while wait > 0:
         print(f"waiting {wait / 60:.0f} min until {datetime.fromtimestamp(start, ET):%H:%M} Eastern", flush=True)
-        time.sleep(wait)
+        time.sleep(min(wait, 600))
+        start = min(start, alarm_start() or start)   # a newer ARM can only move it sooner
+        wait = start - time.time()
     deadline = time.time() + 60 * int(os.environ.get("MAX_MINUTES", 90))
     sent = 0
     while time.time() < deadline:

@@ -1,9 +1,10 @@
 name: Wake alarm
-# OFF by default. Runs daily at 08:30 UTC; arms only if Ollie posted "ARM YYYY-MM-DD HH:MM" (Eastern)
+# OFF by default. Runs every hour; arms only if Ollie posted "ARM YYYY-MM-DD HH:MM" (Eastern)
 # for today to the wake topic (read via the site). No OFF: only a PASS stops it.
+# One run at a time: the next hourly run waits in line, then sees the PASS (or a fresh alarm).
 on:
   schedule:
-    - cron: "30 8 * * *"   # 08:30 UTC = 3:30 AM EST / 4:30 AM EDT
+    - cron: "17 * * * *"   # every hour at :17 (off the busy :00 slot)
   workflow_dispatch:
     inputs:
       alarm_time:
@@ -11,6 +12,9 @@ on:
         default: "now"
       max_minutes:
         default: "10"
+concurrency:
+  group: wake-alarm
+  cancel-in-progress: false
 jobs:
   alarm:
     runs-on: ubuntu-latest

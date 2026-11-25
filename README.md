@@ -95,10 +95,12 @@ check the signature without the key. Stage 5 moves the check off this Mac.
 - Free tier sleeps after 15 min idle; first load takes up to about a minute.
 
 ## Wake alarm (2026-11-25): emails until you pass (`alarm.py`, `.github/workflows/alarm.yml`)
-- OFF by default. GitHub Actions starts at 08:30 UTC daily and asks the site `GET /api/armed`.
+- OFF by default. GitHub Actions runs every hour (one run at a time) and asks the site `GET /api/armed`.
   It exits unless Ollie posted "ARM YYYY-MM-DD HH:MM" (Eastern) for today to the wake topic (see
   OLLIE.md). Arming is one-way: there is no OFF, and among ARM messages the earliest time wins, so a
-  later message can only move the alarm sooner. Then it sleeps until that time, then
+  later message can only move the alarm sooner. The site re-posts an ARM older than 6 h so ntfy's
+  12 h limit never drops it; Ollie can arm any time before the alarm. A run waits only for an alarm
+  less than 3 h away (re-checking every 10 min for an earlier ARM). Then at that time,
   every minute: PASS posted since the alarm time -> stop; challenge running -> wait; else email.
   Gives up after MAX_MINUTES (90).
 - Snooze-proof: "Start challenge" only asks the server for a challenge after the camera sees your
@@ -111,5 +113,6 @@ check the signature without the key. Stage 5 moves the check off this Mac.
   proof does not pause; heartbeats from someone lying down are refused; upright heartbeats pause
   (0 emails); emails resume after a FAIL; PASS stops the alarm. Page gate checked in the browser.
   Not tested: real Gmail sending, the GitHub Actions run, the Render deploy of these changes.
-- Limits: GitHub may start scheduled jobs late (hence the early start) and disables schedules in
+- Tested offline: `test_arming.py`.
+- Limits: GitHub may start scheduled jobs late (hourly runs give several chances) and disables schedules in
   repos with no activity for 60 days. Someone who writes code could fake heartbeats.

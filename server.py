@@ -72,10 +72,20 @@ def pick_arm(messages, today):
     return min(arms, default="off")
 
 
+REFRESH_SECS = 6 * 3600          # ntfy.sh keeps messages ~12 h; re-post an ARM older than this
+
+
 def armed():
-    raw = urllib.request.urlopen(f"{secret_post_url()}/json?poll=1&since=12h", timeout=15).read().decode()
+    url = secret_post_url()
+    raw = urllib.request.urlopen(f"{url}/json?poll=1&since=12h", timeout=15).read().decode()
+    rows = [json.loads(r) for r in raw.splitlines() if r.strip()]
     today = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
-    return pick_arm((json.loads(r).get("message", "") for r in raw.splitlines() if r.strip()), today)
+    at = pick_arm([r.get("message", "") for r in rows], today)
+    if at != "off":   # keep it alive: the hourly alarm job calls this, so an ARM never ages out
+        newest = max(r.get("time", 0) for r in rows if pick_arm([r.get("message", "")], "") == at)
+        if time.time() - newest > REFRESH_SECS:
+            urllib.request.urlopen(urllib.request.Request(url, data=f"ARM {at}".encode(), method="POST"), timeout=15)
+    return at
 
 
 def node(script_args, stdin=None):
