@@ -79,7 +79,7 @@ def post(url, text):
     urllib.request.urlopen(urllib.request.Request(url, data=text.encode(), method="POST"), timeout=15)
 
 
-def armed(job=False):
+def armed(job=False, every=False):
     url = secret_post_url()
     raw = urllib.request.urlopen(f"{url}/json?poll=1&since=12h", timeout=15).read().decode()
     rows = [json.loads(r) for r in raw.splitlines() if r.strip()]
@@ -99,7 +99,7 @@ def armed(job=False):
         if job and not any(r.get("message", "").startswith(f"CONFIRMED {at} ") for r in rows):
             now = datetime.now(ZoneInfo("America/New_York"))
             post(url, f"CONFIRMED {at} seen by alarm job at {now:%Y-%m-%d %H:%M} ET")
-    return at
+    return (at, sorted(newest)) if every else at
 
 
 def node(script_args, stdin=None):
@@ -128,7 +128,8 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path.startswith("/api/armed"):
             # For the alarm job: Ollie arms by posting "ARM YYYY-MM-DD HH:MM" (Eastern) to the topic. No OFF.
             try:
-                return self.send_json({"alarm_at": armed(job="from=job" in self.path)})
+                at, every = armed(job="from=job" in self.path, every=True)
+                return self.send_json({"alarm_at": at, "all": every})
             except Exception:
                 return self.send_json({"alarm_at": None, "why": "could not read topic"}, 502)
         if self.path.startswith("/api/status"):
