@@ -94,10 +94,10 @@ class Handler(SimpleHTTPRequestHandler):
             url = secret_post_url()
             msg = f"{line} | sig={sign(line, url)}"
             urllib.request.urlopen(urllib.request.Request(url, data=msg.encode(), method="POST"), timeout=15)
-            posted = True
-        except Exception:
-            posted = False
-        return self.send_json({"pass": True, "line": line, "posted": posted})
+            posted, err = True, None
+        except Exception as e:     # report only the error type and HTTP status, never the address
+            posted, err = False, f"{type(e).__name__} {getattr(e, 'code', '') or ''}".strip()
+        return self.send_json({"pass": True, "line": line, "posted": posted, "post_error": err})
 
 
 if __name__ == "__main__":
