@@ -1,0 +1,30 @@
+name: Wake alarm
+# OFF by default. Runs daily at 08:30 UTC but does nothing unless repo variable ALARM_AT is
+# "YYYY-MM-DD HH:MM" (Eastern) for today; Ollie sets it. Then alarm.py sleeps until that time.
+on:
+  schedule:
+    - cron: "30 8 * * *"   # 08:30 UTC = 3:30 AM EST / 4:30 AM EDT
+  workflow_dispatch:
+    inputs:
+      alarm_time:
+        description: 'HH:MM Eastern, or "now" to test'
+        default: "now"
+      max_minutes:
+        default: "10"
+jobs:
+  alarm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python alarm.py
+        env:
+          ALARM_TIME: ${{ inputs.alarm_time }}
+          ALARM_AT: ${{ vars.ALARM_AT }}
+          MAX_MINUTES: ${{ inputs.max_minutes || vars.MAX_MINUTES || '90' }}
+          SITE: https://wake-proof.onrender.com
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          ALERT_TO: ${{ secrets.ALERT_TO }}

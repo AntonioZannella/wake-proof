@@ -129,6 +129,11 @@ function run() {
       inferSum += performance.now() - t0; frames++;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const lm = res.landmarks[0];
+      if (gate) {                                         // no challenge until you're up and in view
+        const t = performance.now() / 1000;
+        if (!upright(compact(lm))) { uprightSince = null; $("sub").textContent = "Whole body in view, standing"; }
+        else if (t - (uprightSince ??= t) >= 1.5) { gate = false; beginChallenge(); }
+      }
       if (challenge && !challenge.result) {
         challenge.aspect = video.videoWidth / video.videoHeight;
         const t = performance.now() / 1000, slim = compact(lm);
@@ -188,19 +193,40 @@ async function submit() {
     $("sub").textContent = v.pass ? `${v.line} — ${v.posted ? "posted" : "NOT posted (network error)"}` : v.why;
   } catch (e) { $("sub").textContent = "Could not reach the server: " + e.message; }
 }
+// Same rule as server.py upright(): whole body in the picture, head > shoulders > hips > ankles, tall.
+const UPRIGHT = [0, 11, 12, 23, 24, 25, 26, 27, 28];
+const upright = lm => {
+  if (!lm || UPRIGHT.some(j => !(lm[j].visibility >= 0.3 && lm[j].x >= 0 && lm[j].x <= 1 && lm[j].y >= 0 && lm[j].y <= 1))) return false;
+  const y = (...js) => js.reduce((s, j) => s + lm[j].y, 0) / js.length;
+  const nose = y(0), sh = y(11, 12), hip = y(23, 24), ank = y(27, 28);
+  return nose < sh && sh < hip && hip < ank && ank - nose > 0.25;
+};
+let gate = false, uprightSince = null, hbTimer = null;
 $("challenge-btn").onclick = async () => {
   if (!video.srcObject && !video.src) await startCamera();
-  counter = null;
-  speak("Starting");                       // first speech must come from a tap on iPhone
+  counter = null; challenge = null; clearInterval(hbTimer);
+  speak("Stand up with your whole body in view");   // first speech must come from a tap on iPhone
+  gate = true; uprightSince = null;
+  $("prompt").hidden = false; $("prompt").className = "";
+  $("say").textContent = "Stand up, whole body in view";
+};
+async function beginChallenge() {
   let steps = null;
   try { const c = await (await fetch("api/challenge")).json(); steps = c.steps; challengeId = c.id; }
-  catch { $("prompt").hidden = false; $("say").textContent = "Server unreachable"; return; }
+  catch { $("say").textContent = "Server unreachable"; return; }
   challenge = new Challenge(steps);         // random sequence drawn by the server now, not before
   recording = [];
   challenge.fromFile = !video.srcObject;    // video-file runs are practice only, never posted
   lastSaid = "";
-  $("prompt").hidden = false; $("prompt").className = "";
-};
+  // Every 5 s, send the last 2.5 s of frames. Only these pause the wake-up emails, and only
+  // while they show you upright and in view. Stops when the challenge ends.
+  hbTimer = setInterval(() => {
+    if (!challenge || challenge.result || challenge.fromFile) return clearInterval(hbTimer);
+    const end = recording.at(-1)?.t ?? 0;
+    fetch("api/heartbeat", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: challengeId, frames: recording.filter(f => f.t >= end - 2.5) }) }).catch(() => {});
+  }, 5000);
+}
 let counter = null, calibrated = false;
 $("count-btn").onclick = () => {
   counter = new RepCounter($("exercise").value, { aspect: (video.videoWidth / video.videoHeight) || 0.5625 });

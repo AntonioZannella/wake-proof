@@ -87,7 +87,27 @@ check the signature without the key. Stage 5 moves the check off this Mac.
 - `Dockerfile` (node:20-slim + python3) runs `server.py`; Render sets `PORT`.
 - Secret: env `NTFY_POST_URL` on the Render service. `set_render_secret.sh` copies it from the
   hidden file through the Render API without showing it (asks for an API key and the srv- id).
-- Tested locally: server with the topic from the env var and `PORT` env passes the full
-  end-to-end test (TEST line posted and read back VALID). Not tested: the Docker build (Docker
-  not running here), the Render deploy, `set_render_secret.sh` against the real Render API.
+- Live at https://wake-proof.onrender.com (service srv-dc3ekik0916s738jloig).
+- Tested 2026-11-25: set_render_secret.sh (HTTP 200/201); a simulated run against Render passed
+  the server re-check and posted a TEST line that verify.py reads back VALID. First try failed
+  with URLError: the slim image lacked ca-certificates (fixed in the Dockerfile).
+- Remove the WAKEPROOF_LABEL=TEST env var on Render before a real PASS can post.
 - Free tier sleeps after 15 min idle; first load takes up to about a minute.
+
+## Wake alarm (2026-11-25): emails until you pass (`alarm.py`, `.github/workflows/alarm.yml`)
+- OFF by default. GitHub Actions starts at 08:30 UTC daily and exits unless repo variable ALARM_AT
+  is "YYYY-MM-DD HH:MM" (Eastern) for today (Ollie sets it; see OLLIE.md). Then it sleeps until that time, then
+  every minute: PASS posted since the alarm time -> stop; challenge running -> wait; else email.
+  Gives up after MAX_MINUTES (90).
+- Snooze-proof: "Start challenge" only asks the server for a challenge after the camera sees your
+  whole body standing for 1.5 s. Emails pause only while the page keeps sending heartbeats (last
+  2.5 s of frames every 5 s) that show you upright and in view; a pause lasts 20 s per heartbeat.
+  FAIL or walking away stops heartbeats, so emails resume within 20 s.
+- Server: `GET /api/status?since=<unix>` -> {active, passed}; `POST /api/heartbeat`.
+- Setup: `set_alarm_secrets.sh` or the GitHub website (Settings -> Secrets and variables -> Actions).
+- Tested locally (`test_alarm.py`, dry run, TEST label): emails at alarm; tapping Start with no
+  proof does not pause; heartbeats from someone lying down are refused; upright heartbeats pause
+  (0 emails); emails resume after a FAIL; PASS stops the alarm. Page gate checked in the browser.
+  Not tested: real Gmail sending, the GitHub Actions run, the Render deploy of these changes.
+- Limits: GitHub may start scheduled jobs late (hence the early start) and disables schedules in
+  repos with no activity for 60 days. Someone who writes code could fake heartbeats.
