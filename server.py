@@ -75,7 +75,11 @@ def pick_arm(messages, today):
 REFRESH_SECS = 6 * 3600          # ntfy.sh keeps messages ~12 h; re-post an ARM older than this
 
 
-def armed():
+def post(url, text):
+    urllib.request.urlopen(urllib.request.Request(url, data=text.encode(), method="POST"), timeout=15)
+
+
+def armed(job=False):
     url = secret_post_url()
     raw = urllib.request.urlopen(f"{url}/json?poll=1&since=12h", timeout=15).read().decode()
     rows = [json.loads(r) for r in raw.splitlines() if r.strip()]
@@ -84,7 +88,11 @@ def armed():
     if at != "off":   # keep it alive: the hourly alarm job calls this, so an ARM never ages out
         newest = max(r.get("time", 0) for r in rows if pick_arm([r.get("message", "")], "") == at)
         if time.time() - newest > REFRESH_SECS:
-            urllib.request.urlopen(urllib.request.Request(url, data=f"ARM {at}".encode(), method="POST"), timeout=15)
+            post(url, f"ARM {at}")
+        # Proof for Ollie that the GitHub alarm job itself saw this ARM (posted once per alarm time).
+        if job and not any(r.get("message", "").startswith(f"CONFIRMED {at} ") for r in rows):
+            now = datetime.now(ZoneInfo("America/New_York"))
+            post(url, f"CONFIRMED {at} seen by alarm job at {now:%Y-%m-%d %H:%M} ET")
     return at
 
 
@@ -114,7 +122,7 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path.startswith("/api/armed"):
             # For the alarm job: Ollie arms by posting "ARM YYYY-MM-DD HH:MM" (Eastern) to the topic. No OFF.
             try:
-                return self.send_json({"alarm_at": armed()})
+                return self.send_json({"alarm_at": armed(job="from=job" in self.path)})
             except Exception:
                 return self.send_json({"alarm_at": None, "why": "could not read topic"}, 502)
         if self.path.startswith("/api/status"):

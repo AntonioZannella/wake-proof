@@ -27,7 +27,7 @@ def alarm_start():
     if t == "now":
         return time.time()
     if not t:   # scheduled run: only Ollie's ARM message on the topic arms it (read through the site)
-        at = get_json(f"{SITE}/api/armed").get("alarm_at") or ""
+        at = get_json(f"{SITE}/api/armed?from=job").get("alarm_at") or ""
         print(f"site says armed for: {at or 'unknown (could not reach site)'}", flush=True)
         try:
             day, t = at.split()

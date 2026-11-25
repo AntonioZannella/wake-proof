@@ -30,6 +30,15 @@ for age, rows_msg, want_posts in [(7 * 3600, f"ARM {tomorrow} 6:30", [f"ARM {tom
     server.armed()
     assert posts == want_posts, (age, rows_msg, posts)
 
+# job confirmation: posted once when the job sees an ARM, not again, not for a plain check
+for job, rows, want in [(True, [f"ARM {tomorrow} 06:30"], 1), (False, [f"ARM {tomorrow} 06:30"], 0),
+                        (True, [f"ARM {tomorrow} 06:30", f"CONFIRMED {tomorrow} 06:30 seen by alarm job at x"], 0),
+                        (True, ["OFF"], 0)]:
+    posts.clear()
+    server.urllib.request.urlopen = fake_open([{"time": time.time(), "message": m} for m in rows])
+    server.armed(job=job)
+    assert sum(p.startswith("CONFIRMED") for p in posts) == want, (job, rows, posts)
+
 # hourly lookahead: an alarm 5 h away is left to a later run (returns without waiting)
 alarm.alarm_start = lambda: time.time() + 5 * 3600
 t0 = time.time(); alarm.main(); assert time.time() - t0 < 1
@@ -43,4 +52,4 @@ alarm.time.sleep = lambda s: (seen.append(s), real_sleep(min(s, 0.6)))
 alarm.status = lambda since: {"active": False, "passed": True}
 alarm.main()
 assert seen and seen[0] <= 2.1, seen
-print(f"{len(cases)} parse cases, 3 keep-alive cases, lookahead, earlier-ARM: all ok")
+print(f"{len(cases)} parse cases, 3 keep-alive cases, 4 confirm cases, lookahead, earlier-ARM: all ok")

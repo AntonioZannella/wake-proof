@@ -11,4 +11,7 @@ curl -s -d "ARM 2026-11-26 06:30" "$WAKE_TOPIC_URL"
   keeps the ARM line alive, so it does not expire. Arm at least about an hour ahead to be safe.
 - There is no OFF. Once armed, only Antonio's PASS stops the emails. If several ARM messages exist,
   the earliest time wins, so a later message can only make the alarm sooner, never cancel or delay it.
+- Confirm right after posting: `curl -s https://wake-proof.onrender.com/api/armed` must show
+  `{"alarm_at": "2026-11-26 06:30"}` (the first call can take up to a minute while the site wakes).
+  This is the same check the alarm job uses. If it shows "off" or a different time, post again.
 - Do not print the topic address in chat. ARM lines are not PASS lines.
