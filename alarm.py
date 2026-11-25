@@ -21,13 +21,13 @@ DRY = os.environ.get("DRY_RUN") == "1"
 
 def alarm_start():
     """Unix time to start, or None if the alarm is not armed for today.
-    ALARM_TIME "HH:MM" or "now" (manual runs) wins; otherwise ALARM_AT "YYYY-MM-DD HH:MM" (Eastern),
-    which Ollie sets. Off by default: anything else, or another date, means no alarm."""
+    ALARM_TIME "HH:MM" or "now" is for manual test runs. Otherwise the site's /api/armed decides."""
     t = os.environ.get("ALARM_TIME", "").strip()
     if t == "now":
         return time.time()
-    if not t:
-        at = os.environ.get("ALARM_AT", "").strip()
+    if not t:   # scheduled run: only Ollie's ARM message on the topic arms it (read through the site)
+        at = get_json(f"{SITE}/api/armed").get("alarm_at") or ""
+        print(f"site says armed for: {at or 'unknown (could not reach site)'}", flush=True)
         try:
             day, t = at.split()
             datetime.strptime(day, "%Y-%m-%d")
@@ -42,14 +42,18 @@ def alarm_start():
     return datetime.now(ET).replace(hour=h, minute=m, second=0, microsecond=0).timestamp()
 
 
-def status(since):
+def get_json(url):
     for _ in range(3):   # the free site may be asleep: first call can take up to a minute
         try:
-            return json.loads(urllib.request.urlopen(f"{SITE}/api/status?since={int(since)}", timeout=90).read())
+            return json.loads(urllib.request.urlopen(url, timeout=90).read())
         except Exception as e:
             err = e
             time.sleep(5)
-    return {"active": False, "passed": None, "why": type(err).__name__}
+    return {"why": type(err).__name__}
+
+
+def status(since):
+    return {"active": False, "passed": None, **get_json(f"{SITE}/api/status?since={int(since)}")}
 
 
 def send(subject, body):
@@ -67,7 +71,7 @@ def send(subject, body):
 def main():
     start = alarm_start()
     if start is None:
-        print(f"not armed for today (ALARM_AT={os.environ.get('ALARM_AT', '')!r}); no alarm"); return
+        print("not armed for today; no alarm"); return
     wait = start - time.time()
     if wait < -2 * 3600:
         print("alarm time was more than 2 h ago; nothing to do"); return

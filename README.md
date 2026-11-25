@@ -95,8 +95,10 @@ check the signature without the key. Stage 5 moves the check off this Mac.
 - Free tier sleeps after 15 min idle; first load takes up to about a minute.
 
 ## Wake alarm (2026-11-25): emails until you pass (`alarm.py`, `.github/workflows/alarm.yml`)
-- OFF by default. GitHub Actions starts at 08:30 UTC daily and exits unless repo variable ALARM_AT
-  is "YYYY-MM-DD HH:MM" (Eastern) for today (Ollie sets it; see OLLIE.md). Then it sleeps until that time, then
+- OFF by default. GitHub Actions starts at 08:30 UTC daily and asks the site `GET /api/armed`.
+  It exits unless Ollie posted "ARM YYYY-MM-DD HH:MM" (Eastern) for today to the wake topic (see
+  OLLIE.md). Arming is one-way: there is no OFF, and among ARM messages the earliest time wins, so a
+  later message can only move the alarm sooner. Then it sleeps until that time, then
   every minute: PASS posted since the alarm time -> stop; challenge running -> wait; else email.
   Gives up after MAX_MINUTES (90).
 - Snooze-proof: "Start challenge" only asks the server for a challenge after the camera sees your

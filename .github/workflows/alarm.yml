@@ -1,6 +1,6 @@
 name: Wake alarm
-# OFF by default. Runs daily at 08:30 UTC but does nothing unless repo variable ALARM_AT is
-# "YYYY-MM-DD HH:MM" (Eastern) for today; Ollie sets it. Then alarm.py sleeps until that time.
+# OFF by default. Runs daily at 08:30 UTC; arms only if Ollie posted "ARM YYYY-MM-DD HH:MM" (Eastern)
+# for today to the wake topic (read via the site). No OFF: only a PASS stops it.
 on:
   schedule:
     - cron: "30 8 * * *"   # 08:30 UTC = 3:30 AM EST / 4:30 AM EDT
@@ -22,7 +22,6 @@ jobs:
       - run: python alarm.py
         env:
           ALARM_TIME: ${{ inputs.alarm_time }}
-          ALARM_AT: ${{ vars.ALARM_AT }}
           MAX_MINUTES: ${{ inputs.max_minutes || vars.MAX_MINUTES || '90' }}
           SITE: https://wake-proof.onrender.com
           GMAIL_USER: ${{ secrets.GMAIL_USER }}

@@ -7,6 +7,7 @@ Nothing secret is printed, logged, or sent to the page.
 import hashlib, hmac, json, os, re, secrets, subprocess, sys, time, urllib.request
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from zoneinfo import ZoneInfo
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 NOTE = os.path.expanduser("~/.claude/projects/-Users-antoniozannella-Downloads-claude-code/memory/ntfy-burner-account.md")
@@ -59,6 +60,24 @@ def passed_since(ts):
     return False
 
 
+ARM_RE = re.compile(r"^\s*ARM\s+(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):(\d{2})\s*$", re.I)
+
+
+def pick_arm(messages, today):
+    """One-way arming: there is no OFF. Among 'ARM YYYY-MM-DD HH:MM' messages dated today or later,
+    the EARLIEST wins, so a later message can only move the alarm sooner, never cancel or delay it.
+    Only a PASS stops a running alarm. Returns 'YYYY-MM-DD HH:MM' or 'off'."""
+    arms = [f"{m[1]} {int(m[2]):02d}:{m[3]}" for m in map(ARM_RE.match, messages)
+            if m and int(m[2]) < 24 and int(m[3]) < 60 and m[1] >= today]
+    return min(arms, default="off")
+
+
+def armed():
+    raw = urllib.request.urlopen(f"{secret_post_url()}/json?poll=1&since=12h", timeout=15).read().decode()
+    today = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    return pick_arm((json.loads(r).get("message", "") for r in raw.splitlines() if r.strip()), today)
+
+
 def node(script_args, stdin=None):
     out = subprocess.run(["node", *script_args], input=stdin, capture_output=True, text=True, cwd=HERE, timeout=60)
     if out.returncode:
@@ -82,6 +101,12 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        if self.path.startswith("/api/armed"):
+            # For the alarm job: Ollie arms by posting "ARM YYYY-MM-DD HH:MM" (Eastern) to the topic. No OFF.
+            try:
+                return self.send_json({"alarm_at": armed()})
+            except Exception:
+                return self.send_json({"alarm_at": None, "why": "could not read topic"}, 502)
         if self.path.startswith("/api/status"):
             # For the alarm job: is a challenge running right now, and has a PASS arrived since ?since=<unix>?
             # A started challenge counts as running for ACTIVE_SECS unless its result came in first.
