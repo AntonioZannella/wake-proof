@@ -15,6 +15,21 @@ CHALLENGE_TTL = 15 * 60          # s a challenge stays valid
 HEARTBEAT_SECS = 20              # s one good heartbeat pauses the alarm emails
 heartbeats = {}                  # challenge id -> time of last good heartbeat
 UPRIGHT_JOINTS = [0, 11, 12, 23, 24, 25, 26, 27, 28]
+USED = [0, 11, 12, 15, 16, 23, 24, 25, 26, 27, 28]   # joints the page sends, in this order
+results = {}                     # challenge id -> (reply, time): a retried submit gets the same reply
+
+
+def expand(frames):
+    """Page sends {t, p:[[x,y,vis] per USED joint] or null} to keep uploads small; rebuild 33 landmarks."""
+    for f in frames:
+        if "p" in f:
+            lm = None
+            if f["p"]:
+                lm = [{"x": 0, "y": 0, "visibility": 0} for _ in range(33)]
+                for j, (x, y, v) in zip(USED, f["p"]):
+                    lm[j] = {"x": x, "y": y, "visibility": v}
+            f["lm"] = lm
+    return frames
 
 
 def upright(lm):
@@ -165,7 +180,7 @@ class Handler(SimpleHTTPRequestHandler):
             # Page sends its last ~2 s of frames every few seconds during a challenge.
             try:
                 data = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                frames = data["frames"]
+                frames = expand(data["frames"])
                 ok = (data["id"] in open_challenges and len(frames) >= 10
                       and frames[-1]["t"] - frames[0]["t"] >= 1.5
                       and sum(upright(f["lm"]) for f in frames) >= 0.6 * len(frames))
@@ -178,35 +193,51 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_error(404)
         try:
             data = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        except Exception:
+            return self.send_json({"pass": False, "why": "bad upload"}, 400)
+        now = time.time()
+        for k in [k for k, (_, t) in results.items() if now - t > CHALLENGE_TTL]:
+            del results[k]
+        if data.get("id") in results:                        # page retried after a lost reply
+            return self.send_json(results[data["id"]][0])
+        try:
             steps, issued = open_challenges.pop(data["id"])      # one use only
         except Exception:
             return self.send_json({"pass": False, "why": "unknown or used challenge"}, 400)
-        now = time.time()
-        frames = data.get("frames") or []
+        reply = self.check(data, steps, issued, now)
+        results[data["id"]] = (reply, time.time())
+        return self.send_json(reply)
+
+    def check(self, data, steps, issued, now):
+        frames = expand(data.get("frames") or [])
         if now - issued > CHALLENGE_TTL or not frames:
-            return self.send_json({"pass": False, "why": "challenge expired"})
+            return {"pass": False, "why": "challenge expired"}
         # The recording cannot be longer than the real time since the challenge was issued.
         if frames[-1]["t"] - frames[0]["t"] > now - issued + 2:
-            return self.send_json({"pass": False, "why": "recording longer than real time"})
+            return {"pass": False, "why": "recording longer than real time"}
         try:
             r = json.loads(node(["verify_run.js"], json.dumps({"steps": steps, "frames": frames, "aspect": data.get("aspect", 0.5625)})))
         except Exception:
-            return self.send_json({"pass": False, "why": "server check failed"}, 500)
+            return {"pass": False, "why": "server check failed"}
         if not r.get("pass"):
-            return self.send_json({"pass": False, "why": "server re-check: " + r.get("why", "?")})
+            return {"pass": False, "why": "server re-check: " + r.get("why", "?")}
         stamp = datetime.now(timezone.utc)
         # Tests set WAKEPROOF_LABEL=TEST so a simulated run never posts a real PASS.
         line = f"{stamp:%Y-%m-%d} | {stamp:%H:%M} UTC | {LABEL}"
-        try:
-            url = secret_post_url()
-            msg = f"{line} | sig={sign(line, url)}"
-            urllib.request.urlopen(urllib.request.Request(url, data=msg.encode(), method="POST"), timeout=15)
-            posted, err = True, None
-            global last_post
-            last_post = time.time()
-        except Exception as e:     # report only the error type and HTTP status, never the address
-            posted, err = False, f"{type(e).__name__} {getattr(e, 'code', '') or ''}".strip()
-        return self.send_json({"pass": True, "line": line, "posted": posted, "post_error": err})
+        posted, err = False, None
+        for attempt in range(4):   # ntfy hiccups should not cost a real PASS
+            try:
+                url = secret_post_url()
+                post(url, f"{line} | sig={sign(line, url)}")
+                posted, err = True, None
+                global last_post
+                last_post = time.time()
+                break
+            except Exception as e:     # report only the error type and HTTP status, never the address
+                err = f"{type(e).__name__} {getattr(e, 'code', '') or ''}".strip()
+                time.sleep(2 * (attempt + 1))
+        sys.stderr.write(f"result: pass, posted={posted} {err or ''}\n")
+        return {"pass": True, "line": line, "posted": posted, "post_error": err}
 
 
 if __name__ == "__main__":

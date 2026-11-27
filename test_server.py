@@ -47,12 +47,15 @@ try:
     sim = simulate(c["steps"], "obey")
     t0 = time.time()
     time.sleep(max(0, sim["frames"][-1]["t"] - sim["frames"][0]["t"] - (time.time() - t0)))
-    r = post({"id": c["id"], "frames": sim["frames"], "aspect": sim["aspect"]})
-    check("obedient run passes and posts", r.get("pass") and r.get("posted"), str(r))
+    USED = [0, 11, 12, 15, 16, 23, 24, 25, 26, 27, 28]   # send the page's small packed format
+    packed = [{"t": f["t"], "p": [[f["lm"][j]["x"], f["lm"][j]["y"], f["lm"][j]["visibility"]] for j in USED] if f["lm"] else None}
+              for f in sim["frames"]]
+    first = post({"id": c["id"], "frames": packed, "aspect": sim["aspect"]})
+    check("obedient run (packed upload) passes and posts", first.get("pass") and first.get("posted"), str(first))
 
-    # 2. Same challenge id again (replay of the request).
-    r = post({"id": c["id"], "frames": sim["frames"], "aspect": sim["aspect"]})
-    check("same challenge id refused", not r.get("pass"), r.get("why", ""))
+    # 2. Same challenge id again (the page retrying after a lost reply): same verdict, no second post.
+    r = post({"id": c["id"], "frames": [], "aspect": sim["aspect"]})
+    check("retry of same id gets the same reply, no new post", r == first, str(r))
 
     # 3. Recording from challenge 1 sent for a new challenge.
     c2 = get("/api/challenge")

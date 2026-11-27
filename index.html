@@ -137,7 +137,7 @@ function run() {
       if (challenge && !challenge.result) {
         challenge.aspect = video.videoWidth / video.videoHeight;
         const t = performance.now() / 1000, slim = compact(lm);
-        recording.push({ t, lm: slim });                 // the server re-runs exactly these frames
+        recording.push({ t: r4(t), p: pack(slim) });      // the server re-runs exactly these frames
         const r = challenge.update(slim, t);
         $("say").textContent = challenge.prompt; $("sub").textContent = challenge.detail;
         if (r) {
@@ -181,17 +181,26 @@ const speak = text => { try { speechSynthesis.cancel(); speechSynthesis.speak(ne
 const USED = new Set([0, 11, 12, 15, 16, 23, 24, 25, 26, 27, 28]);
 const r4 = v => Math.round(v * 1e4) / 1e4;
 const compact = lm => lm ? lm.map((q, i) => USED.has(i) ? { x: r4(q.x), y: r4(q.y), visibility: r4(q.visibility) } : { x: 0, y: 0, visibility: 0 }) : null;
+// Small upload: [x, y, vis] for the used joints only (the server rebuilds the full list).
+const USED_ARR = [...USED];
+const pack = slim => slim ? USED_ARR.map(j => [slim[j].x, slim[j].y, slim[j].visibility]) : null;
 let recording = [], challengeId = null;
 async function submit() {
-  $("sub").textContent = "Checking on the server…";
-  try {
-    const res = await fetch("api/result", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: challengeId, frames: recording, aspect: challenge.aspect }) });
-    const v = await res.json();
-    $("prompt").className = v.pass ? "pass" : "fail";
-    $("say").textContent = v.pass ? "PASS" : "FAIL";
-    $("sub").textContent = v.pass ? `${v.line} — ${v.posted ? "posted" : "NOT posted (network error)"}` : v.why;
-  } catch (e) { $("sub").textContent = "Could not reach the server: " + e.message; }
+  const body = JSON.stringify({ id: challengeId, frames: recording, aspect: challenge.aspect });
+  for (let attempt = 1; attempt <= 8; attempt++) {     // the server answers a repeat with the same verdict
+    $("sub").textContent = `Checking on the server… keep this page open (try ${attempt})`;
+    try {
+      const res = await fetch("api/result", { method: "POST", headers: { "Content-Type": "application/json" }, body });
+      const v = await res.json();
+      $("prompt").className = v.pass && v.posted ? "pass" : "fail";
+      $("say").textContent = !v.pass ? "FAIL" : v.posted ? "PASS — posted" : "PASS but NOT posted";
+      $("sub").textContent = v.pass ? `${v.line} — ${v.posted ? "alarm will stop" : "alarm keeps going: " + v.post_error}` : v.why;
+      speak(!v.pass ? "Fail" : v.posted ? "Posted. Alarm will stop." : "Not posted. Try again.");
+      return;
+    } catch (e) { await new Promise(r => setTimeout(r, 4000)); }
+  }
+  $("say").textContent = "NOT posted"; $("sub").textContent = "Could not reach the server. Tap Start challenge again.";
+  speak("Not posted. Try again.");
 }
 // Same rule as server.py upright(): whole body in the picture, head > shoulders > hips > ankles, tall.
 const UPRIGHT = [0, 11, 12, 23, 24, 25, 26, 27, 28];
